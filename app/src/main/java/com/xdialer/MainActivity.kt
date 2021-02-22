@@ -1,6 +1,7 @@
 package com.xdialer
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.*
 import android.content.pm.PackageManager
@@ -28,8 +29,10 @@ import com.xdialer.Constants.Companion.PERMISSIONS_REQUEST_PHONE_CALL
 import com.xdialer.Constants.Companion.PERMISSIONS_REQUEST_READ_CONTACTS
 import im.dlg.dialer.DialpadActivity
 import im.dlg.dialer.DialpadFragment
-import java.util.*
-import kotlin.collections.ArrayList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 //8602119024
 class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
@@ -42,10 +45,10 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
     private var lblinfo: TextView? = null
     private var contactAdapter: ContactAdapter? = null
     private var contactList: ArrayList<Contact>? = ArrayList()
-    private var imgSearch :ImageView?=null
-    private var searching:Boolean  = false
+    private var imgSearch: ImageView? = null
+    private var searching: Boolean = false
 
-    private  var cId = ""
+    private var cId = ""
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -130,7 +133,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
                 Log.e(javaClass.simpleName, "formatted->$formatted")
                 Log.e(javaClass.simpleName, "raw->$raw")
 
-                if(raw!=null && raw.isNotEmpty()){
+                if (raw != null && raw.isNotEmpty()) {
                     makeWhatsappCall(raw)
                 }
 
@@ -142,61 +145,29 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
     private fun makeWhatsappCall(raw: String) {
 
-        var name: String = getContactName(raw!!, this);
-
-        if(name!=null&& name.isNotEmpty()){
-            Log.e(javaClass.simpleName, "name->$name")
-            var id = getContactIdForWhatsAppCall(name, this);
-            Log.e(javaClass.simpleName, "id->$id")
-
-            if (id != 0) {
-
+        if (checkPhoneNumberExist(raw, applicationContext)!!) {
+            val name = getContactNameByPhoneNumber(raw);
+            val id = getContactIdForWhatsAppCall(name, applicationContext)
+            if (id!!.toInt() != 0) {
                 onCall(id.toString())
-
-            }else{
-                Toast.makeText(
-                    applicationContext,
-                    "Mobile number not registered on whatsapp",
-                    Toast.LENGTH_LONG
-                ).show()
+            } else {
+                Log.e("Error--->", "error")
             }
         }else{
-
-            var d =raw
-            whatsappCall(d)
+            val name = getContactNameByPhoneNumber(raw);
+            val id = getContactIdForWhatsAppCall(name, applicationContext)
+            if (id!!.toInt() != 0) {
+                onCall(id.toString())
+            } else {
+                Log.e("Error--->", "error")
+            }
         }
-
 
     }
 
 
-    private fun whatsappCall(raw: String) {
-
-        var name: String = getContactName(raw!!, this);
 
 
-        if(name==null || name.isEmpty()){
-            return
-        }
-
-
-
-        Log.e(javaClass.simpleName, "name->$name")
-        var id = getContactIdForWhatsAppCall(name, this);
-        Log.e(javaClass.simpleName, "id->$id")
-
-        if (id != 0) {
-
-            onCall(id.toString())
-
-        }else{
-            Toast.makeText(
-                applicationContext,
-                "Mobile number not registered on whatsapp",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
     private fun insertContactDisplayName(
         addContactsUri: Uri,
         rawContactId: Long,
@@ -273,7 +244,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
     private fun filter(text: String) {
 
-        try{
+        try {
             val filterdConact: ArrayList<Contact> = ArrayList()
 
 
@@ -287,7 +258,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
 
             contactAdapter!!.filterList(filterdConact!!)
-        }catch (e: Exception){
+        } catch (e: Exception) {
             Log.e(javaClass.simpleName, e.toString())
         }
 
@@ -362,7 +333,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
             if (grantResults.first() == PackageManager.PERMISSION_GRANTED) {
 
 
-                if(cId.isNotEmpty()){
+                if (cId.isNotEmpty()) {
                     val intent = Intent()
                     intent.action = Intent.ACTION_VIEW
                     intent.setDataAndType(
@@ -371,7 +342,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
                     )
                     intent.setPackage("com.whatsapp")
                     startActivity(intent)
-                }else{
+                } else {
                     Toast.makeText(
                         applicationContext,
                         "Permission granted.",
@@ -501,72 +472,87 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
     }
 
 
+    @SuppressLint("LongLogTag")
+    private fun checkPhoneNumberExist(phoneNumber: String, context: Context): Boolean? {
+        var inserted: Boolean? = false
+        val nameOfContactNumber = getContactNameByPhoneNumber(phoneNumber)
+        if (nameOfContactNumber.isEmpty()) {
+            val addContactsUri: Uri = ContactsContract.Data.CONTENT_URI
+            val rowContactId: Long = getRawContactId()
+            insertContactDisplayName(addContactsUri, rowContactId, phoneNumber, context)
+            inserted = insertContactPhoneNumber(
+                addContactsUri,
+                rowContactId,
+                phoneNumber,
+                "mobile",
+                context
+            )
+        }
+        Log.e("checkPhoneNumberExist--->",inserted.toString())
+        return inserted
+    }
 
 
-    private fun getContactName(phoneNumber: String, context: Context): String {
-        var uri = Uri.withAppendedPath(
+    @SuppressLint("LongLogTag")
+    fun getContactNameByPhoneNumber(phoneNumber: String): String {
+        var contactName: String = ""
+        val uri = Uri.withAppendedPath(
             ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
             Uri.encode(phoneNumber)
-        );
-
-        var projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME);
-
-        var contactName: String = "";
-        var cursor: Cursor? = context.contentResolver.query(uri, projection, null, null, null);
-
+        )
+        val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME);
+        val cursor: Cursor? = this.contentResolver.query(uri, projection, null, null, null);
         if (cursor != null) {
             if (cursor.moveToFirst()) {
                 Log.e(javaClass.simpleName, "cursor -->1")
                 contactName = cursor.getString(0);
-
-                return contactName;
-            } else {
-                Log.e(javaClass.simpleName, "cursor -->0")
-                Log.e(javaClass.simpleName, "cursor==null")
-
-                var addContactsUri: Uri = ContactsContract.Data.CONTENT_URI;
-                var rowContactId: Long = getRawContactId();
-                insertContactDisplayName(addContactsUri, rowContactId, phoneNumber, context)
-                var inserted: Boolean = insertContactPhoneNumber(
-                    addContactsUri,
-                    rowContactId,
-                    phoneNumber,
-                    "mobile",
-                    context
-                )
-
-                Log.e(javaClass.simpleName, "inserted-->$inserted")
-
             }
-
-            cursor.close();
         }
-
-        return contactName;
+        Log.e("getContactNameByPhoneNumber--->",contactName.toString())
+        return contactName
     }
 
+    private fun addToContact(phoneNumber: String, context: Context) {
+        var addContactsUri: Uri = ContactsContract.Data.CONTENT_URI;
+        var rowContactId: Long = getRawContactId();
+        insertContactDisplayName(addContactsUri, rowContactId, phoneNumber, context)
+        var inserted: Boolean = insertContactPhoneNumber(
+            addContactsUri,
+            rowContactId,
+            phoneNumber,
+            "mobile",
+            context
+        )
+    }
 
-    private fun getContactIdForWhatsAppCall(name: String, context: Context): Int {
+    @SuppressLint("LongLogTag")
+    private fun getContactIdForWhatsAppCall(name: String, context: Context): String? {
+        var phoneContactID: String? = ""
+        if (name.isNotEmpty()) {
+            phoneContactID =  getInfo(name)
+        }
+        Log.e("getContactIdForWhatsAppCall--->",phoneContactID.toString())
+        return phoneContactID
+    }
 
-        var cursor = context.contentResolver.query(
+    private fun getInfo(name: String): String? {
+        var phoneContactID: String? = ""
+        val cursor: Cursor? = this.contentResolver.query(
             ContactsContract.Data.CONTENT_URI,
             arrayOf(ContactsContract.Data._ID),
             ContactsContract.Data.DISPLAY_NAME + "=? and " + ContactsContract.Data.MIMETYPE + "=?",
             arrayOf(name, "$mimeString"),
             ContactsContract.Contacts.DISPLAY_NAME
-        );
-
-        return if (cursor!!.getCount() > 0) {
-            cursor.moveToNext();
-            var phoneContactID: Int =
-                cursor.getInt(cursor.getColumnIndex(ContactsContract.Data._ID));
-
-            Log.e("name--->\t$name", " \nid------>\t$phoneContactID");
-            phoneContactID;
-        } else {
-            println("0 ");
-            0;
+        )
+        Log.e(javaClass.simpleName, "cursor")
+        if (cursor!!.moveToFirst()) {
+            phoneContactID =
+                cursor.getString(cursor.getColumnIndex(ContactsContract.Data._ID))
+            Log.e("name--->\t$name", " \nid------>\t$phoneContactID")
         }
+        cursor.close()
+        Log.e("ngetInfo" ,phoneContactID.toString())
+        return phoneContactID
     }
 
 //    public int getContactIdForWhatsAppVideoCall(String name,Context context)
@@ -610,66 +596,112 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
     fun buttonClickEvent(v: View) {
         var phoneNo: String = edtPhoneNumber!!.getText().toString()
         try {
+
+
             when (v.id) {
                 R.id.btnAterisk -> {
                     lblinfo!!.setText("")
                     phoneNo += "*"
                     edtPhoneNumber!!.setText(phoneNo)
+
+
                 }
                 R.id.btnHash -> {
                     lblinfo!!.setText("")
                     phoneNo += "#"
                     edtPhoneNumber!!.setText(phoneNo)
+
+
                 }
                 R.id.btnZero -> {
                     lblinfo!!.setText("")
                     phoneNo += "0"
                     edtPhoneNumber!!.setText(phoneNo)
+
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
                 }
                 R.id.btnOne -> {
                     lblinfo!!.setText("")
                     phoneNo += "1"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnTwo -> {
                     lblinfo!!.setText("")
                     phoneNo += "2"
                     edtPhoneNumber!!.setText(phoneNo)
+
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
                 }
                 R.id.btnThree -> {
                     lblinfo!!.setText("")
                     phoneNo += "3"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnFour -> {
                     lblinfo!!.setText("")
                     phoneNo += "4"
                     edtPhoneNumber!!.setText(phoneNo)
+
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
                 }
                 R.id.btnFive -> {
                     lblinfo!!.setText("")
                     phoneNo += "5"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnSix -> {
                     lblinfo!!.setText("")
                     phoneNo += "6"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnSeven -> {
                     lblinfo!!.setText("")
                     phoneNo += "7"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnEight -> {
                     lblinfo!!.setText("")
                     phoneNo += "8"
                     edtPhoneNumber!!.setText(phoneNo)
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
+
                 }
                 R.id.btnNine -> {
                     lblinfo!!.setText("")
                     phoneNo += "9"
                     edtPhoneNumber!!.setText(phoneNo)
+
+//                    if(phoneNo.length==10){
+//                        addToContact(phoneNo,this)
+//                    }
                 }
                 R.id.btndel -> {
 
@@ -677,8 +709,11 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
                     lblinfo!!.setText("")
                     if (phoneNo != null && phoneNo.length > 0) {
                         phoneNo = phoneNo.substring(0, phoneNo.length - 1)
+
                     }
                     edtPhoneNumber!!.setText(phoneNo)
+
+
                 }
                 R.id.btnClearAll -> {
                     lblinfo!!.setText("")
@@ -695,14 +730,15 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
                         callIntent.data = Uri.parse(callInfo)
                         startActivity(callIntent)
                     } else {
-//                        val callInfo = "tel:$phoneNo"
-//                        val callIntent = Intent(Intent.ACTION_CALL)
-//                        callIntent.data = Uri.parse(callInfo)
-//                        startActivity(callIntent)
+
+//                        getContactName(phoneNo, this);
+
                         makeWhatsappCall(phoneNo)
                     }
                 }
             }
+
+
         } catch (ex: Exception) {
         }
     }
