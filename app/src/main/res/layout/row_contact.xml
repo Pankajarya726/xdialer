@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        app:cardBackgroundColor="#ffffff"
+        app:cardCornerRadius="2dp"
+        app:cardElevation="2dp">
+
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="15dp">
+
+
+            <ImageView
+                android:id="@+id/img_contact"
+                android:layout_width="70dp"
+                android:layout_height="70dp"
+                android:layout_alignParentLeft="true"
+                android:layout_centerVertical="true"
+                android:src="@drawable/user" />
+
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_marginLeft="10dp"
+                android:layout_centerVertical="true"
+                android:layout_toRightOf="@+id/img_contact"
+                android:gravity="center_vertical"
+                android:foregroundGravity="center_vertical"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/txt_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Name"
+                    android:textColor="@color/colorBlack"
+                    android:textSize="16dp"
+                    android:fontFamily="@font/josefinsansregular"
+                    app:fontFamily="@font/josefinsanslight"
+                    />
+
+                <TextView
+                    android:id="@+id/txt_number"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:text="7909370454"
+                    android:fontFamily="@font/josefinsansregular"
+                    app:fontFamily="@font/josefinsansregular"
+                    android:textColor="@color/colorBlack"
+                    android:textSize="16dp" />
+
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/img_call"
+                android:layout_width="40dp"
+                android:layout_height="50dp"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:layout_marginRight="15dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/whatsapp"
+
+                />
+
+
+        </RelativeLayout>
+    </androidx.cardview.widget.CardView>
+
+</layout>
