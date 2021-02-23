@@ -3,13 +3,16 @@ package com.xdialer
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.ProgressDialog
 import android.content.*
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.provider.ContactsContract
+import android.provider.ContactsContract.PhoneLookup
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
@@ -23,16 +26,22 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.tomash.androidcontacts.contactgetter.main.contactsGetter.ContactsGetterBuilder
 import com.xdialer.Constants.Companion.PERMISSIONS_REQUEST_PHONE_CALL
 import com.xdialer.Constants.Companion.PERMISSIONS_REQUEST_READ_CONTACTS
 import im.dlg.dialer.DialpadActivity
 import im.dlg.dialer.DialpadFragment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.util.*
+import kotlin.collections.ArrayList
+
 
 //8602119024
 class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
@@ -48,10 +57,14 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
     private var imgSearch: ImageView? = null
     private var searching: Boolean = false
 
+    var progressbar: ProgressDialog? = null
+
     private var cId = ""
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        progressbar = ProgressDialog(this)
+        progressbar!!.setMessage("call in progress...")
         rvContact = findViewById<RecyclerView>(R.id.rv_contact)
         searchEditText = findViewById<EditText>(R.id.editTextSearch)
         lblinfo = findViewById<TextView>(R.id.lblinfo)
@@ -143,29 +156,154 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
     }
 
+    val contactName: MutableLiveData<String> = MutableLiveData()
+    val contactIdByName: MutableLiveData<String> = MutableLiveData()
+    val contactIdByNameAgain: MutableLiveData<String> = MutableLiveData()
+    val insertContactBoolean: MutableLiveData<Boolean> = MutableLiveData()
+
+    @SuppressLint("LongLogTag")
     private fun makeWhatsappCall(raw: String) {
+        progressbar!!.setCancelable(false)
 
-        if (checkPhoneNumberExist(raw, applicationContext)!!) {
-            val name = getContactNameByPhoneNumber(raw);
-            val id = getContactIdForWhatsAppCall(name, applicationContext)
-            if (id!!.toInt() != 0) {
-                onCall(id.toString())
-            } else {
-                Log.e("Error--->", "error")
+        val contactNumber = getContactNameByPhoneNumber(raw)
+        if (contactNumber.isEmpty()) {
+            progressbar!!.show()
+            val isContactAdded = addToContact(raw, this@MainActivity)
+            Log.e("IScontactadded--->","--"+isContactAdded)
+            if (addToContact(raw, this@MainActivity)) {
+                Handler().postDelayed({
+                    progressbar!!.dismiss()
+                    makeWhatsappCall(raw)
+                },5000)
             }
-        }else{
-            val name = getContactNameByPhoneNumber(raw);
-            val id = getContactIdForWhatsAppCall(name, applicationContext)
-            if (id!!.toInt() != 0) {
-                onCall(id.toString())
-            } else {
-                Log.e("Error--->", "error")
-            }
+        } else {
+            val contactid = getContactIdByName(contactNumber)
+            onCall(contactid)
         }
+    }
 
+    /* GlobalScope.launch(Dispatchers.Main) {
+         if (it.isNotEmpty()) {
+             getContactIdByName(it).observe(this@MainActivity, { response ->
+                 progressbar!!.dismiss()
+                 onCall(response)
+             })
+         } else {
+             insertContactAndMakeCall(raw).observe(this@MainActivity, {
+                 if (it) {
+                     Log.e("Response---->",it.toString())
+                     GlobalScope.launch(Dispatchers.Main) {
+
+                         getContactNameByPhoneNumber(raw).observe(this@MainActivity, {contactNameByPhone ->
+                             if (contactNameByPhone.isNotEmpty()) {
+                                 callAgain(contactNameByPhone)
+                                 Log.e("contactNameByPhone---->",contactNameByPhone)
+                             }
+                         })
+                     }
+                 }
+             })
+         }
+
+     }*/
+
+//    private fun callAgain(contactNameByPhone:String) {
+//        GlobalScope.launch(Dispatchers.Main){
+//            getContactIdByNameNew(contactNameByPhone).observe(this@MainActivity,
+//                { response ->
+//                    Log.e("getContactNameByPhoneNumber response---->",response)
+////                                                         progressbar!!.dismiss()
+//                    if(response.isNotEmpty()){
+//                        onCall(response)
+//                    }
+//
+//                })
+//        }
+//    }
+
+    private suspend fun insertContactAndMakeCall(phoneNumber: String): MutableLiveData<Boolean> {
+
+//        val checIfPhoneExist = CheckIfPhoneExist(phoneNumber)
+
+        var inserted: Boolean? = false
+        val addContactsUri: Uri = ContactsContract.Data.CONTENT_URI
+        val rowContactId: Long = getRawContactId()
+        insertContactDisplayName(addContactsUri, rowContactId, phoneNumber, this)
+        inserted = insertContactPhoneNumber(
+            addContactsUri,
+            rowContactId,
+            phoneNumber,
+            "mobile",
+            this
+        )
+        insertContactBoolean.postValue(inserted)
+        return insertContactBoolean
+    }
+
+//    private fun CheckIfPhoneExist(phoneNumber: String): Boolean {
+////        getContactNameByPhoneNumber()
+//
+//    }
+
+
+    private fun getContactIdByName(name: String): String {
+        var contactIdString = ""
+        val cursor: Cursor? = this.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID),
+            ContactsContract.Data.DISPLAY_NAME + "=? and " + ContactsContract.Data.MIMETYPE + "=?",
+            arrayOf(name, "$mimeString"),
+            ContactsContract.Contacts.DISPLAY_NAME
+        )
+        Log.e("cursor count--->", "---" + cursor!!.count)
+        if(cursor!!.moveToFirst()){
+            contactIdString = cursor.getString(cursor.getColumnIndex(ContactsContract.Data._ID))
+        }
+        cursor.close()
+        return contactIdString
+    }
+
+    private suspend fun getContactIdByNameNew(name: String): LiveData<String> {
+        val cursor: Cursor? = this.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID),
+            ContactsContract.Data.DISPLAY_NAME + "=? and " + ContactsContract.Data.MIMETYPE + "=?",
+            arrayOf(name, "$mimeString"),
+            ContactsContract.Contacts.DISPLAY_NAME
+        )
+        Log.e(javaClass.simpleName, "cursor")
+        if (cursor!!.moveToFirst()) {
+            contactIdByNameAgain.postValue(cursor.getString(cursor.getColumnIndex(ContactsContract.Data._ID)))
+        }
+        cursor.close()
+        return contactIdByNameAgain
+    }
+
+    fun getContactIDFromNumber(contactNumber: String?, context: Context): Int {
+        var contactNumber = contactNumber
+        contactNumber = Uri.encode(contactNumber)
+        var phoneContactID: Int = Random().nextInt()
+        val contactLookupCursor = context.contentResolver.query(
+            Uri.withAppendedPath(
+                PhoneLookup.CONTENT_FILTER_URI,
+                contactNumber
+            ), arrayOf(PhoneLookup.DISPLAY_NAME, PhoneLookup._ID), null, null, null
+        )
+        while (contactLookupCursor!!.moveToNext()) {
+            phoneContactID =
+                contactLookupCursor.getInt(contactLookupCursor.getColumnIndexOrThrow(PhoneLookup._ID))
+        }
+        contactLookupCursor.close()
+        return phoneContactID
     }
 
 
+    private fun functionCheckPhoneNumberExist(raw: String): String {
+        val contactData = ContactsGetterBuilder(this)
+            .onlyWithPhones()
+            .withPhone(raw).firstOrNull()
+        return contactData.contactId.toString()
+    }
 
 
     private fun insertContactDisplayName(
@@ -440,7 +578,6 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
     override fun onCall(id: String) {
 
-        Log.e("contact id", id)
 
         val intent = Intent()
         intent.action = Intent.ACTION_VIEW
@@ -471,7 +608,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
         }
     }
 
-
+/*
     @SuppressLint("LongLogTag")
     private fun checkPhoneNumberExist(phoneNumber: String, context: Context): Boolean? {
         var inserted: Boolean? = false
@@ -488,50 +625,50 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
                 context
             )
         }
-        Log.e("checkPhoneNumberExist--->",inserted.toString())
+        Log.e("checkPhoneNumberExist--->", inserted.toString())
         return inserted
-    }
+    }*/
 
 
     @SuppressLint("LongLogTag")
     fun getContactNameByPhoneNumber(phoneNumber: String): String {
-        var contactName: String = ""
+        var contactNumber = ""
         val uri = Uri.withAppendedPath(
-            ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+            PhoneLookup.CONTENT_FILTER_URI,
             Uri.encode(phoneNumber)
         )
-        val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME);
-        val cursor: Cursor? = this.contentResolver.query(uri, projection, null, null, null);
+        val projection = arrayOf(PhoneLookup.DISPLAY_NAME)
+        val cursor: Cursor? = contentResolver.query(uri, projection, null, null, null);
         if (cursor != null) {
             if (cursor.moveToFirst()) {
-                Log.e(javaClass.simpleName, "cursor -->1")
-                contactName = cursor.getString(0);
+                contactNumber = cursor.getString(0)
             }
         }
-        Log.e("getContactNameByPhoneNumber--->",contactName.toString())
-        return contactName
+        return contactNumber
     }
 
-    private fun addToContact(phoneNumber: String, context: Context) {
-        var addContactsUri: Uri = ContactsContract.Data.CONTENT_URI;
-        var rowContactId: Long = getRawContactId();
+    private fun addToContact(phoneNumber: String, context: Context): Boolean {
+        val addContactsUri: Uri = ContactsContract.Data.CONTENT_URI
+        var inserted: Boolean = false
+        val rowContactId: Long = getRawContactId();
         insertContactDisplayName(addContactsUri, rowContactId, phoneNumber, context)
-        var inserted: Boolean = insertContactPhoneNumber(
+        inserted = insertContactPhoneNumber(
             addContactsUri,
             rowContactId,
             phoneNumber,
             "mobile",
             context
         )
+        return inserted
     }
 
     @SuppressLint("LongLogTag")
     private fun getContactIdForWhatsAppCall(name: String, context: Context): String? {
         var phoneContactID: String? = ""
         if (name.isNotEmpty()) {
-            phoneContactID =  getInfo(name)
+            phoneContactID = getInfo(name)
         }
-        Log.e("getContactIdForWhatsAppCall--->",phoneContactID.toString())
+        Log.e("getContactIdForWhatsAppCall--->", phoneContactID.toString())
         return phoneContactID
     }
 
@@ -551,7 +688,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
             Log.e("name--->\t$name", " \nid------>\t$phoneContactID")
         }
         cursor.close()
-        Log.e("ngetInfo" ,phoneContactID.toString())
+        Log.e("ngetInfo", phoneContactID.toString())
         return phoneContactID
     }
 
@@ -740,6 +877,7 @@ class MainActivity : AppCompatActivity(), ContactAdapter.CustomClickListener,
 
 
         } catch (ex: Exception) {
+            ex.printStackTrace()
         }
     }
 }

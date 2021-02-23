@@ -59,7 +59,7 @@ class SplashActivity : AppCompatActivity() {
         Log.e(javaClass.simpleName, "loadContacts")
         val databaseHandler: SqliteDb = SqliteDb(this)
         databaseHandler.deleteAllContact()
-        var contactList = databaseHandler.getContact()
+        val contactList = databaseHandler.getContact()
         if (contactList != null && contactList!!.size > 0) {
         mDelayHandler = Handler()
         mDelayHandler!!.postDelayed(mRunnable, SPLASH_DELAY)
